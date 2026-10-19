@@ -1,0 +1,73 @@
+services:
+  log-permissions:
+    build:
+      context: .
+      dockerfile: deployment/Dockerfile
+    user: root
+    entrypoint: ["sh", "-c"]
+    command:
+      - "chown -R appuser:appgroup /app/logs && chmod -R u+rwX,go+rX /app/logs"
+    volumes:
+      - mcp-logs:/app/logs
+    restart: "no"
+
+  doris-mcp-server:
+    build:
+      context: .
+      dockerfile: deployment/Dockerfile
+    env_file:
+      - .env
+    environment:
+      # Docker needs a non-loopback bind internally; the published port stays local.
+      ALLOW_UNAUTHENTICATED_NON_LOOPBACK: "true"
+      # v0.6.1 uses this path's parent directory for its generated log files.
+      LOG_FILE_PATH: /app/logs/server.log
+      LOG_LEVEL: INFO
+      ENABLE_AUDIT: "true"
+    ports:
+      - "127.0.0.1:${MCP_PORT:-3000}:3000"
+    volumes:
+      - mcp-logs:/app/logs
+    depends_on:
+      log-permissions:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  forwarder-config:
+    image: splunk/universalforwarder:latest
+    user: root
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        cp -an /opt/splunkforwarder-etc/. /opt/splunkforwarder/etc/ &&
+        mkdir -p /opt/splunkforwarder/etc/apps/doris_forwarder/local &&
+        cp /mnt/forwarder-config/local/*.conf /opt/splunkforwarder/etc/apps/doris_forwarder/local/ &&
+        chown -R splunk:splunk /opt/splunkforwarder/etc
+    volumes:
+      - forwarder-etc:/opt/splunkforwarder/etc
+      - ./deployment/splunk/forwarder:/mnt/forwarder-config:ro
+    restart: "no"
+
+  splunk-forwarder:
+    image: splunk/universalforwarder:latest
+    hostname: doris-mcp-forwarder
+    depends_on:
+      log-permissions:
+        condition: service_completed_successfully
+      forwarder-config:
+        condition: service_completed_successfully
+    environment:
+      SPLUNK_START_ARGS: "--accept-license"
+      SPLUNK_GENERAL_TERMS: "--accept-sgt-current-at-splunk-com"
+      SPLUNK_PASSWORD: "ChooseAStrongPassword123!"
+    volumes:
+      # Only MCP and its forwarder share logs; Splunk receives over TCP.
+      - mcp-logs:/mnt/doris-logs:ro
+      - forwarder-data:/opt/splunkforwarder/var
+      - forwarder-etc:/opt/splunkforwarder/etc
+    restart: unless-stopped
+
+volumes:
+  mcp-logs:
+  forwarder-data:
+  forwarder-etc:
