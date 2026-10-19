@@ -1,0 +1,32 @@
+services:
+  splunk:
+    image: splunk/splunk:latest
+    container_name: splunk-container
+    ports:
+      - "8000:8000"       # Web UI
+      - "8089:8089"       # Management REST API (HTTPS)
+      - "514:514/udp"     # Syslog
+      - "8088:8088"       # HTTP Event Collector
+      - "9997:9997"       # Universal Forwarder receiver
+      # Publishing these ports makes them reachable; 
+      # it doesn’t enable the inputs. 
+      # enable receiving on 9997 in Splunk Web. 
+      # Syslog and HEC can be configured later when needed.
+    environment:
+      SPLUNK_START_ARGS: "--accept-license"
+      SPLUNK_GENERAL_TERMS: "--accept-sgt-current-at-splunk-com"
+      SPLUNK_PASSWORD: "ChooseAStrongPassword123!"
+    volumes:
+      - splunk-data:/opt/splunk/var
+      - splunk-etc:/opt/splunk/etc
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
+
+volumes:
+  splunk-data:
+  splunk-etc:
